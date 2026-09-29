@@ -458,3 +458,8 @@ STR_FIRMWARE_WRITE_FAILED: "خطا در نصب Firmware"
 STR_FIRMWARE_UPDATE_DO_NOT_POWER_OFF: "دستگاه را خاموش نکنید!"
 STR_RECOVERY_MODE: "حالت بازیابی"
 STR_RECOVERY_MODE_HINT: "فایل firmware.bin را در پوشه‌ی اصلی کارت حافظه قرار دهید و انتخابش کنید"
+
+STR_SYNC_HIGHLIGHTS: "Sync Highlights"
+STR_HIGHLIGHT_SYNC_CONFIG: "Configure highlight-sync.json on the SD card"
+STR_HIGHLIGHT_SYNC_FAILED: "Sync failed. Highlights are saved; try again."
+STR_HIGHLIGHT_SYNC_DONE: "Highlights saved to your archive"
