@@ -56,8 +56,11 @@ in-book annotation sync are outside this feature.
 
 Build `pio run -e x4pro`. Before installing, back up the entire SD card including
 hidden files, and preserve a known-good firmware backup. Install the app binary
-using CrossPoint's documented SD firmware updater/OTA mechanism or the correct
-app partition offset from the generated partition table. Do not flash the app
+using **Settings → System → SD Card Firmware Update**, selecting the standalone
+`.pio/build/x4pro/firmware.bin` copied onto the SD card. This path is present in
+CrossPoint 1.6.0 and writes the inactive OTA slot after validating the image.
+The generated table has app0 at `0x10000` and app1 at `0x650000`, each `0x640000`
+bytes; a manual USB write must first establish the actual active/next slot. Do not flash the app
 binary at address zero, erase flash, delete caches, or overwrite the SD card.
 No firmware installation is performed by the build process.
 
