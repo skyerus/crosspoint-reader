@@ -9,15 +9,13 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 
-HighlightSyncActivity::HighlightSyncActivity(GfxRenderer& renderer, MappedInputManager& input, std::string title,
-                                             std::string author)
-    : UiListActivity("HighlightSync", renderer, input), title(std::move(title)), author(std::move(author)) {}
+HighlightSyncActivity::HighlightSyncActivity(GfxRenderer& renderer, MappedInputManager& input)
+    : UiListActivity("HighlightSync", renderer, input) {}
 
 const char* HighlightSyncActivity::headerTitle() const { return tr(STR_SYNC_HIGHLIGHTS); }
 
 void HighlightSyncActivity::onEnter() {
   UiListActivity::onEnter();
-  total = CLIPPINGS.clippingCount();
   if (!config.load()) {
     status = StrId::STR_HIGHLIGHT_SYNC_CONFIG;
     requestUpdate();
@@ -43,18 +41,27 @@ void HighlightSyncActivity::onEnter() {
 void HighlightSyncActivity::loop() {
   UiListActivity::loop();
   if (!uploading) return;
-  // One request per loop permits cancellation between excerpts. No background
-  // worker can outlive this activity or access the clipping store after exit.
-  const bool done = uploaded == total;
-  const bool accepted = done || uploadHighlight(config, uploaded, title, author);
+  std::string path;
+  HighlightMutation mutation;
+  bool accepted = false;
+  bool done = false;
+  bool failed = false;
+  if (HighlightOutbox::next(path, mutation)) {
+    accepted = uploadHighlightMutation(config, mutation) && HighlightOutbox::acknowledge(path);
+    failed = !accepted;
+  } else if (HighlightOutbox::pending()) {
+    failed = true;
+  } else {
+    const int seeded = ClippingStore::seedOneArchiveClipping();
+    failed = seeded < 0;
+    done = seeded == 0;
+  }
   {
     RenderLock lock(*this);
-    if (!accepted) {
+    if (accepted) ++uploaded;
+    if (failed || done) {
       uploading = false;
-      status = StrId::STR_HIGHLIGHT_SYNC_FAILED;
-    } else if (done || ++uploaded == total) {
-      uploading = false;
-      status = StrId::STR_HIGHLIGHT_SYNC_DONE;
+      status = failed ? StrId::STR_HIGHLIGHT_SYNC_FAILED : StrId::STR_HIGHLIGHT_SYNC_DONE;
     }
   }
   requestUpdate();
@@ -80,7 +87,7 @@ void HighlightSyncActivity::buildScreen(UiScreen& screen) {
                                                         0, static_cast<int16_t>(metrics.buttonHintsHeight), 0});
   screen.centeredText(I18N.get(status), screen.theme().bodyText);
   char count[48];
-  snprintf(count, sizeof(count), "%u / %u", static_cast<unsigned>(uploaded), static_cast<unsigned>(total));
+  snprintf(count, sizeof(count), tr(STR_HIGHLIGHTS_UPLOADED_COUNT), static_cast<unsigned>(uploaded));
   screen.centeredText(count, screen.theme().bodyText);
   freeink::ui::ListItem row;
   row.label = tr(STR_BACK);

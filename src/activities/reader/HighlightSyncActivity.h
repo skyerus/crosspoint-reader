@@ -6,7 +6,7 @@
 
 class HighlightSyncActivity final : public UiListActivity {
  public:
-  HighlightSyncActivity(GfxRenderer& renderer, MappedInputManager& input, std::string title, std::string author);
+  HighlightSyncActivity(GfxRenderer& renderer, MappedInputManager& input);
   void onEnter() override;
   void onExit() override;
   void loop() override;
@@ -23,10 +23,7 @@ class HighlightSyncActivity final : public UiListActivity {
   void activateIndex(int index) override;
   void onBackButton() override;
   HighlightSyncConfig config;
-  std::string title;
-  std::string author;
   size_t uploaded = 0;
-  size_t total = 0;
   bool uploading = false;
   bool wifiActivated = false;
   StrId status = StrId::STR_SYNC_HIGHLIGHTS;

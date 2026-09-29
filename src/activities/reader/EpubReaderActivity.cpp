@@ -1085,8 +1085,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         discardOverlayPage();
         if (auto* fcm = renderer.getFontCacheManager()) fcm->releaseSdFontCaches();
       }
-      auto activity =
-          makeUniqueNoThrow<HighlightSyncActivity>(renderer, mappedInput, epub->getTitle(), epub->getAuthor());
+      auto activity = makeUniqueNoThrow<HighlightSyncActivity>(renderer, mappedInput);
       if (activity) startActivityForResult(std::move(activity), [this](const ActivityResult&) { requestUpdate(); });
       break;
     }

@@ -8,6 +8,9 @@ class ClippingDurability : public testing::Test {
   ClippingStore store;
   void SetUp() override {
     Storage.files.clear();
+    Storage.directories.clear();
+    HalFile::failClosePath.clear();
+    HalStorage::failRenameFrom.clear();
     HalFile::failClose = false;
     ASSERT_TRUE(store.loadForBook("/book.epub", "Book", "Author", "epub"));
   }

@@ -533,3 +533,5 @@ STR_SYNC_HIGHLIGHTS: "Sync Highlights"
 STR_HIGHLIGHT_SYNC_CONFIG: "Configure highlight-sync.json on the SD card"
 STR_HIGHLIGHT_SYNC_FAILED: "Sync failed. Highlights are saved; try again."
 STR_HIGHLIGHT_SYNC_DONE: "Highlights saved to your archive"
+
+STR_HIGHLIGHTS_UPLOADED_COUNT: "%u changes uploaded"

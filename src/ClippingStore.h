@@ -37,6 +37,8 @@ struct ClippedBookEntry {
   uint16_t count = 0;
 };
 
+struct HighlightMutation;
+
 class ClippingStore {
  public:
   enum class AddResult : uint8_t {
@@ -68,6 +70,8 @@ class ClippingStore {
   bool readClippingText(size_t index, std::string& out) const;
   bool readClippingText(const Clipping& clipping, std::string& out) const;
 
+  // Enqueues at most one legacy excerpt. Returns 1=queued, 0=complete, -1=retry.
+  static int seedOneArchiveClipping();
   static bool hasAnyClippings();
   static bool hasForFilePath(const std::string& filePath, const std::string& bookType);
   static bool getAllClippedBooks(std::vector<ClippedBookEntry>& out);
@@ -90,7 +94,7 @@ class ClippingStore {
   bool readFromFile();
   bool readFromFile(const std::string& path, std::vector<Clipping>& out) const;
   bool writeToFile(const std::string* replacementText = nullptr, size_t replacementIndex = SIZE_MAX,
-                   const std::string* textSourcePath = nullptr);
+                   const std::string* textSourcePath = nullptr, const HighlightMutation* mutation = nullptr);
 };
 
 inline bool clippingStoredRangeMatchesLayout(const Clipping& clipping, const uint16_t currentPageCount,

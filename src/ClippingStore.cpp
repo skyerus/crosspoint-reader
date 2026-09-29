@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Serialization.h>
 
 #include <algorithm>
@@ -11,6 +12,7 @@
 #include <functional>
 
 #include "clippings/ClippingPreview.h"
+#include "clippings/HighlightOutbox.h"
 
 namespace {
 constexpr uint8_t LEGACY_VERSION = 1;
@@ -164,7 +166,12 @@ ClippingStore::AddResult ClippingStore::addClipping(const uint16_t spineIndex, c
 
   clippings.push_back(std::move(clipping));
   dirty = true;
-  if (!writeToFile(&text, clippings.size() - 1)) {
+  HighlightMutation mutation;
+  mutation.title = bookTitle;
+  mutation.author = bookAuthor;
+  mutation.text = text.substr(0, CLIPPING_TEXT_MAX);
+  mutation.id = highlightId(bookTitle, bookAuthor, mutation.text);
+  if (!writeToFile(&text, clippings.size() - 1, nullptr, &mutation)) {
     clippings.pop_back();
     dirty = true;
     return AddResult::SaveFailed;
@@ -196,14 +203,30 @@ bool ClippingStore::stampMissingLayoutSignature(const uint32_t layoutSignature) 
 
 bool ClippingStore::removeClippingAt(const size_t index) {
   if (!writable || index >= clippings.size()) return false;
+  HighlightMutation mutation;
+  mutation.title = bookTitle;
+  mutation.author = bookAuthor;
+  if (!readClippingText(index, mutation.text)) return false;
+  mutation.id = highlightId(bookTitle, bookAuthor, mutation.text);
+  mutation.deleted = true;
+  // Identical saved passages share an archive ID. Removing just one duplicate
+  // must not delete the quote while another local clipping still owns it.
+  bool duplicateRemains = false;
+  std::string otherText;
+  for (size_t i = 0; i < clippings.size(); ++i) {
+    if (i == index) continue;
+    if (!readClippingText(i, otherText)) return false;
+    if (otherText == mutation.text) duplicateRemains = true;
+  }
   Clipping clipping = std::move(clippings[index]);
   clippings.erase(clippings.begin() + index);
   dirty = true;
-  if (!saveToFile()) {
+  if (!writeToFile(nullptr, SIZE_MAX, nullptr, duplicateRemains ? nullptr : &mutation)) {
     clippings.insert(clippings.begin() + index, std::move(clipping));
     dirty = true;
     return false;
   }
+  dirty = false;
   return true;
 }
 
@@ -395,7 +418,9 @@ bool ClippingStore::readFromFile(const std::string& path, std::vector<Clipping>&
 }
 
 bool ClippingStore::writeToFile(const std::string* replacementText, const size_t replacementIndex,
-                                const std::string* textSourcePath) {
+                                const std::string* textSourcePath, const HighlightMutation* mutation) {
+  HighlightOutbox::Transaction transaction;
+  if (!transaction.ready()) return false;
   Storage.mkdir("/.crosspoint");
   Storage.mkdir(CLIPPINGS_DIR);
 
@@ -499,6 +524,13 @@ bool ClippingStore::writeToFile(const std::string* replacementText, const size_t
     return false;
   }
 
+  // Persist the event before replacing the authoritative clipping file. Its
+  // before/after digests make reboot recovery distinguish commit from rollback.
+  if (mutation && !transaction.prepare(storeFilePath, tmpPath, *mutation)) {
+    Storage.remove(tmpPath.c_str());
+    return false;
+  }
+
   if (hasDestination && !Storage.rename(storeFilePath.c_str(), backupPath.c_str())) {
     LOG_ERR("CLIP", "Failed to back up clipping file: %s", storeFilePath.c_str());
     Storage.remove(tmpPath.c_str());
@@ -513,11 +545,69 @@ bool ClippingStore::writeToFile(const std::string* replacementText, const size_t
   if (hasDestination && Storage.exists(backupPath.c_str())) {
     Storage.remove(backupPath.c_str());
   }
+  if (!transaction.commit()) {
+    // The source is committed. Keep the durable intent and refuse subsequent
+    // mutations until recovery can finalize its outbox entry.
+    writable = false;
+    LOG_ERR("CLIP", "Saved clipping; outbox finalization pending");
+  }
   for (uint16_t i = 0; i < count; ++i) {
     clippings[i].textOffset = newTextOffsets[i];
     clippings[i].textLength = newTextLengths[i];
   }
   return true;
+}
+
+int ClippingStore::seedOneArchiveClipping() {
+  HighlightOutbox::Transaction transaction;
+  if (!transaction.ready()) return -1;
+  if (!Storage.exists(CLIPPINGS_DIR)) return 0;
+  HalFile directory = Storage.open(CLIPPINGS_DIR);
+  if (!directory || !directory.isDirectory()) return -1;
+  while (auto entry = directory.openNextFile()) {
+    char name[96];
+    entry.getName(name, sizeof(name));
+    const size_t length = strlen(name);
+    if (length < 4 || strcmp(name + length - 4, ".bin") != 0) continue;
+    const std::string path = std::string(CLIPPINGS_DIR) + "/" + name;
+    const std::string marker = path + ".archive-seeded";
+    std::string digest;
+    if (!transaction.digest(path, digest)) return -1;
+    uint16_t cursor = 0;
+    {
+      HalFile saved;
+      std::string previousDigest;
+      if (Storage.openFileForRead("HSeed", marker, saved) && serialization::tryReadString(saved, previousDigest, 32) &&
+          previousDigest == digest) {
+        if (!serialization::tryReadPod(saved, cursor)) cursor = 0;
+      }
+    }
+    // A single bounded book index is loaded, not the entire library. Heap
+    // allocation keeps its strings/index off the background task's small stack.
+    auto header = makeUniqueNoThrow<ClippingFileHeader>();
+    auto book = makeUniqueNoThrow<ClippingStore>();
+    if (!header || !book || !readClippingFileHeader(path, name, *header)) return -1;
+    if (cursor >= header->count) continue;
+    book->storeFilePath = path;
+    if (!book->readFromFile()) return -1;
+    HighlightMutation mutation;
+    mutation.title = header->title;
+    mutation.author = header->author;
+    if (!book->readClippingText(cursor, mutation.text)) return -1;
+    mutation.id = highlightId(mutation.title, mutation.author, mutation.text);
+    if (!transaction.prepare(path, path, mutation) || !transaction.commit()) return -1;
+    ++cursor;
+    const std::string temporary = marker + ".tmp";
+    HalFile output = Storage.open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
+    const bool written =
+        output && serialization::tryWriteString(output, digest) && serialization::tryWritePod(output, cursor);
+    const bool closed = output && output.close();
+    if (!written || !closed) return -1;
+    if (Storage.exists(marker.c_str()) && !Storage.remove(marker.c_str())) return -1;
+    if (!Storage.rename(temporary.c_str(), marker.c_str())) return -1;
+    return 1;
+  }
+  return 0;
 }
 
 bool ClippingStore::hasAnyClippings() {

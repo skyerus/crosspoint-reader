@@ -3,10 +3,7 @@
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <HalStorage.h>
-#include <MD5Builder.h>
 #include <WiFi.h>
-
-#include "ClippingStore.h"
 
 namespace {
 // Plain HTTP is explicitly limited to the trusted home LAN. No redirects are
@@ -43,45 +40,25 @@ bool HighlightSyncConfig::load() {
          token.find_first_of("\r\n") == std::string::npos && !deviceId.empty() && deviceId.size() <= 128;
 }
 
-bool uploadHighlight(const HighlightSyncConfig& config, const size_t index, const std::string& title,
-                     const std::string& author) {
-  const Clipping* clipping = CLIPPINGS.clippingAt(index);
-  if (!clipping || WiFi.status() != WL_CONNECTED) return false;
-  std::string text;
-  if (!CLIPPINGS.readClippingText(index, text) || text.empty()) return false;
-  // ID deliberately excludes page/layout, file path, time and list index:
-  // retrying, relayout, deletion of an earlier entry and renaming cannot change
-  // the identity of the same excerpt. The archive deduplicates across devices.
-  MD5Builder digest;
-  digest.begin();
-  digest.add(title.c_str());
-  digest.add("\n");
-  digest.add(author.c_str());
-  digest.add("\n");
-  digest.add(text.c_str());
-  digest.calculate();
-  const std::string id = std::string("cp-") + digest.toString().c_str();
+bool uploadHighlightMutation(const HighlightSyncConfig& config, const HighlightMutation& mutation) {
   // One <=4 KiB excerpt per request keeps heap use independent of library size.
   JsonDocument doc;
   doc["source"] = "crosspoint";
   doc["device_id"] = config.deviceId;
   auto highlight = doc["highlights"].to<JsonArray>().add<JsonObject>();
-  highlight["id"] = id;
-  highlight["book_title"] = title;
-  highlight["author"] = author;
-  highlight["text"] = text;
-  char location[80];
-  snprintf(location, sizeof(location), "section %u, page %u", clipping->spineIndex + 1, clipping->startPage + 1);
-  highlight["location"] = location;
+  highlight["id"] = mutation.id;
+  highlight["book_title"] = mutation.title;
+  highlight["author"] = mutation.author;
+  highlight["text"] = mutation.text;
+  if (mutation.deleted) highlight["deleted"] = true;
   if (doc.overflowed()) return false;
   std::string body;
   serializeJson(doc, body);
   doc.clear();
-  text.clear();
   WiFiClient client;
   HTTPClient http;
-  http.setConnectTimeout(3000);
-  http.setTimeout(5000);
+  http.setConnectTimeout(1500);
+  http.setTimeout(2000);
   http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
   if (!http.begin(client, config.endpoint.c_str())) return false;
   http.addHeader("Content-Type", "application/json");
@@ -97,7 +74,7 @@ bool uploadHighlight(const HighlightSyncConfig& config, const size_t index, cons
   http.end();
   if (deserializeJson(doc, response)) return false;
   for (JsonVariant accepted : doc["accepted"].as<JsonArray>()) {
-    if (accepted.is<const char*>() && id == accepted.as<const char*>()) return true;
+    if (accepted.is<const char*>() && mutation.id == accepted.as<const char*>()) return true;
   }
   return false;
 }
