@@ -75,7 +75,7 @@ void HighlightSyncActivity::onExit() {
 }
 
 void HighlightSyncActivity::buildScreen(UiScreen& screen) {
-  const auto& metrics = GUI.getMetrics();
+  const auto& metrics = UITheme::getInstance().getMetrics();
   screen.setContentMarginFromScreen(freeink::ui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight),
                                                         0, static_cast<int16_t>(metrics.buttonHintsHeight), 0});
   screen.centeredText(I18N.get(status), screen.theme().bodyText);
