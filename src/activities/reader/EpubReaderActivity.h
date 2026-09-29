@@ -46,6 +46,7 @@ class EpubReaderActivity final : public ReaderActivity {
   unsigned long dictionaryMessageTime = 0UL;
   bool showClippingMessage = false;
   bool clippingSaved = false;
+  bool clippingTruncated = false;
   bool clippingLimitReached = false;
   unsigned long clippingMessageTime = 0UL;
   bool currentPageBookmarked = false;

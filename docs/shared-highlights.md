@@ -1,7 +1,7 @@
 # Shared highlight archive (custom firmware)
 
-This branch combines upstream touch-clipping PR #3589 with a local archive
-uploader. Reading-progress credentials and behaviour stay separate.
+This branch combines upstream touch-clipping PR #3589 with the local
+[Reader Bridge](https://github.com/skyerus/reader-bridge) archive uploader. Reading-progress credentials and behaviour stay separate.
 
 ## Configure
 
@@ -9,9 +9,9 @@ Put `highlight-sync.json` under `/.crosspoint/` on the SD card:
 
 ```json
 {
-  "endpoint": "http://Skyes-MacBook-Pro-2.local:8084/v1/highlights",
+  "endpoint": "http://reader-bridge.local:8084/v1/highlights",
   "token": "REPLACE_WITH_A_DEDICATED_RANDOM_TOKEN_AT_LEAST_32_CHARACTERS",
-  "device_id": "xteink-skye"
+  "device_id": "xteink-reader"
 }
 ```
 
@@ -28,7 +28,22 @@ or library credentials.
 ## Use on X4 Pro
 
 1. In an EPUB, tap the centre, then **More → Save Clipping**.
-2. Touch and drag over the words, then release to save.
+2. Touch and drag over the words. Hold at the bottom or right screen edge for
+   one second to turn forward without lifting your finger; top or left turns
+   backward. Move away from the edge before approaching it again for another
+   turn. Release to save one ordered excerpt across those pages. You can move
+   backward to shorten a selection or extend it before its original page.
+
+Page loading is on demand, with one current page and its word index retained;
+there is no three-page or 240-word selection window. Image-only pages are
+skipped. If the chapter cache is still indexing, the requested page waits for
+small incremental layout steps; releasing during that wait still captures the
+incoming boundary word once available. Selections stay within the current EPUB
+spine/chapter. Cross-chapter selection needs a different stored anchor format.
+
+The existing 4 KiB excerpt limit keeps complete words and UTF-8 characters,
+updates the saved endpoint to match, and shows a limit notice when shortened.
+Returning to the reader retains the page where your selection cursor ended.
 3. **More → View Clippings** shows the saved excerpts. Long-press an item and
    confirm **Delete** to remove it locally and from the shared quote archive.
 

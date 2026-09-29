@@ -41,9 +41,11 @@ struct PageResult {
 };
 
 struct ClippingResult {
+  bool truncated = false;
   std::string text;
-  uint16_t startPageOffset = 0;
-  uint16_t endPageOffset = 0;
+  uint16_t focusPage = 0;
+  uint16_t startPage = 0;
+  uint16_t endPage = 0;
   uint16_t startWordIndex = 0;
   uint16_t endWordIndex = 0;
   uint16_t wordCount = 0;

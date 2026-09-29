@@ -63,7 +63,6 @@ bool xteinkClassPanel() { return gpio.isXteinkDevice() || BoardConfig::isX4Pro()
 constexpr int PAGE_TURN_RATES[] = {1, 1, 3, 6, 12};
 constexpr size_t initialBookmarkCacheCapacity = 16;
 constexpr float bookmarkProgressEpsilon = 0.0001f;
-constexpr int CLIP_SELECTION_PAGE_WINDOW = 3;
 
 bool hasVisibleWordText(const char* text) {
   if (!text) return false;
@@ -372,21 +371,9 @@ void EpubReaderActivity::startClipSelection() {
   if (!section || !epub || section->currentPage < 0 || section->currentPage >= section->pageCount) return;
 
   const int pageNumber = section->currentPage;
-  const uint16_t pageCount = section->pageCount;
   const uint16_t spineIndex = static_cast<uint16_t>(currentSpineIndex);
-  std::vector<std::unique_ptr<Page>> pages;
-  pages.reserve(CLIP_SELECTION_PAGE_WINDOW);
-  for (int pageOffset = 0; pageOffset < CLIP_SELECTION_PAGE_WINDOW && pageNumber + pageOffset < pageCount;
-       ++pageOffset) {
-    auto page = section->loadPage(pageNumber + pageOffset);
-    if (!page) break;
-    pages.push_back(std::move(page));
-  }
-  if (pages.empty()) {
-    LOG_ERR("CLIP", "Failed to load page %d for clipping selection", pageNumber);
-    requestUpdate();
-    return;
-  }
+  auto page = section->loadPage(pageNumber);
+  if (!page) return;
 
   if (buildViewportWidth == 0 || buildViewportHeight == 0) {
     LOG_ERR("CLIP", "Cannot anchor clipping before the reader viewport is initialized");
@@ -407,27 +394,48 @@ void EpubReaderActivity::startClipSelection() {
   std::string bookTitle = epub->getTitle();
   std::string author = epub->getAuthor();
 
-  auto activity =
-      makeUniqueNoThrow<ClipSelectionActivity>(renderer, mappedInput, std::move(pages), marginLeft, marginTop);
+  // Reader stays suspended on the activity stack. The selector calls this
+  // only under RenderLock, keeping section layout/font state serialized.
+  auto loader = [this, spineIndex](uint16_t target) -> ClipSelectionActivity::PageLoad {
+    if (!section || currentSpineIndex != spineIndex) return {};
+    if (target >= section->pageCount) {
+      if (!section->isBuilding() && section->isPartial()) {
+        if (!section->startBuild(SETTINGS.readerRenderSpec(buildViewportWidth, buildViewportHeight))) return {};
+      }
+      if (section->isBuilding()) {
+        if (!section->buildSomeMore(2)) return {};
+        if (target >= section->pageCount) return {nullptr, section->isBuilding()};
+      }
+    }
+    if (target >= section->pageCount) return {};
+    return {section->loadPage(target), false};
+  };
+  auto activity = makeUniqueNoThrow<ClipSelectionActivity>(renderer, mappedInput, std::move(page),
+                                                           static_cast<uint16_t>(pageNumber), std::move(loader),
+                                                           marginLeft, marginTop);
   if (!activity) {
     LOG_ERR("CLIP", "Failed to allocate clipping selection activity");
     requestUpdate();
     return;
   }
-  startActivityForResult(std::move(activity), [this, spineIndex, pageNumber, pageCount, layoutSignature,
-                                               bookTitle = std::move(bookTitle), author = std::move(author),
+  startActivityForResult(std::move(activity), [this, spineIndex, layoutSignature, bookTitle = std::move(bookTitle),
+                                               author = std::move(author),
                                                chapterTitle = std::move(chapterTitle)](const ActivityResult& result) {
     if (result.isCancelled) {
       requestUpdate();
       return;
     }
     const auto& clipping = std::get<ClippingResult>(result.data);
-    const uint16_t startPage = static_cast<uint16_t>(pageNumber + clipping.startPageOffset);
-    const uint16_t endPage = static_cast<uint16_t>(pageNumber + clipping.endPageOffset);
-    if (section && currentSpineIndex == spineIndex && endPage < section->pageCount) {
-      section->currentPage = endPage;
-      currentPageVisibleOffset = section->getVisibleTextOffsetForPage(endPage);
+    const uint16_t startPage = clipping.startPage;
+    const uint16_t endPage = clipping.endPage;
+    if (!section || currentSpineIndex != spineIndex || startPage > endPage || endPage >= section->pageCount ||
+        clipping.focusPage >= section->pageCount) {
+      requestUpdate();
+      return;
     }
+    const uint16_t pageCount = section->pageCount;
+    section->currentPage = clipping.focusPage;
+    currentPageVisibleOffset = section->getVisibleTextOffsetForPage(clipping.focusPage);
     const uint16_t paragraphIndex =
         section ? section->getParagraphIndexForPage(startPage).value_or(UINT16_MAX) : UINT16_MAX;
     const auto addResult =
@@ -443,6 +451,7 @@ void EpubReaderActivity::startClipSelection() {
       }
     }
     clippingSaved = addResult == ClippingStore::AddResult::Added;
+    clippingTruncated = clippingSaved && clipping.truncated;
     clippingLimitReached = addResult == ClippingStore::AddResult::LimitReached;
     showClippingMessage = true;
     clippingMessageTime = millis();
@@ -1646,6 +1655,7 @@ void EpubReaderActivity::renderBook() {
 
   if (showClippingMessage) {
     GUI.drawPopup(renderer, clippingLimitReached ? tr(STR_CLIPPING_LIMIT_REACHED)
+                            : clippingTruncated  ? tr(STR_CLIPPING_TRUNCATED)
                             : clippingSaved      ? tr(STR_CLIPPING_SAVED)
                                                  : tr(STR_CLIPPING_FAILED));
   }
