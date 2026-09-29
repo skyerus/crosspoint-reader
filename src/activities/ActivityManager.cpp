@@ -15,6 +15,7 @@
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
+#include "clippings/HighlightAutoSync.h"
 #include "components/HeaderBackTapTarget.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
@@ -133,6 +134,9 @@ void ActivityManager::loop() {
   }
 
   while (pendingAction != PendingAction::None) {
+    // Hand radio and filesystem ownership to the next activity only after the
+    // background worker has cooperatively drained, without holding RenderLock.
+    if (!HighlightAutoSync::cancelAndReady()) return;
     if (pendingAction == PendingAction::Pop) {
       RenderLock lock;
 
@@ -358,6 +362,11 @@ void ActivityManager::popActivity() {
     pendingActivity.reset();
   }
   pendingAction = PendingAction::Pop;
+}
+
+bool ActivityManager::allowsHighlightAutoSync() const {
+  return pendingAction == PendingAction::None && currentActivity &&
+         (currentActivity->isHomeActivity() || currentActivity->name == "EpubReader");
 }
 
 bool ActivityManager::preventAutoSleep() const { return currentActivity && currentActivity->preventAutoSleep(); }
