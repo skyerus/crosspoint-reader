@@ -13,7 +13,7 @@
 namespace {
 constexpr const char* DIRECTORY = "/.crosspoint/highlight-outbox";
 constexpr const char* INTENT = "/.crosspoint/highlight-outbox/transaction.intent";
-constexpr uint8_t VERSION = 1;
+constexpr uint8_t VERSION = 2;
 std::mutex queueMutex;
 struct Record {
   uint64_t sequence = 0;
@@ -72,7 +72,7 @@ bool read(const char* path, Record& record) {
   HalFile file;
   if (!Storage.openFileForRead("HQueue", path, file) || file.size() > 32768) return false;
   uint8_t version = 0;
-  return serialization::tryReadPod(file, version) && version == VERSION &&
+  return serialization::tryReadPod(file, version) && (version == 1 || version == VERSION) &&
          serialization::tryReadPod(file, record.sequence) && record.sequence > 0 &&
          serialization::tryReadString(file, record.target, 4096) &&
          serialization::tryReadString(file, record.before, 32) &&
@@ -81,7 +81,8 @@ bool read(const char* path, Record& record) {
          serialization::tryReadString(file, record.mutation.title, 4096) &&
          serialization::tryReadString(file, record.mutation.author, 4096) &&
          serialization::tryReadString(file, record.mutation.text, 4096) &&
-         serialization::tryReadPod(file, record.mutation.deleted) && file.available() == 0;
+         serialization::tryReadPod(file, record.mutation.deleted) &&
+         (version == 1 || serialization::tryReadPod(file, record.mutation.createdAt)) && file.available() == 0;
 }
 
 bool recover() {
@@ -145,7 +146,8 @@ bool Transaction::prepare(const std::string& storePath, const std::string& tempo
       serialization::tryWriteString(file, storePath) && serialization::tryWriteString(file, before) &&
       serialization::tryWriteString(file, after) && serialization::tryWriteString(file, mutation.id) &&
       serialization::tryWriteString(file, mutation.title) && serialization::tryWriteString(file, mutation.author) &&
-      serialization::tryWriteString(file, mutation.text) && serialization::tryWritePod(file, mutation.deleted);
+      serialization::tryWriteString(file, mutation.text) && serialization::tryWritePod(file, mutation.deleted) &&
+      serialization::tryWritePod(file, mutation.createdAt);
   const bool closed = file.close();
   if (!written || !closed) {
     Storage.remove(temp.c_str());

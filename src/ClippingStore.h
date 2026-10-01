@@ -22,7 +22,7 @@ struct Clipping {
   uint16_t endWordIndex = 0;
   uint16_t wordCount = 0;
   uint16_t paragraphIndex = UINT16_MAX;
-  uint32_t timestamp = 0;
+  uint32_t timestamp = 0;  // UTC epoch seconds; zero means no recorded creation date.
   uint32_t layoutSignature = 0;
   uint32_t textOffset = 0;
   uint16_t textLength = 0;

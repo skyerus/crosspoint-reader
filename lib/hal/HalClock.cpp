@@ -34,7 +34,7 @@ void HalClock::setTimezone(const char* posixTz) {
   _lastPollMs = 0;  // re-derive local time under the new rule immediately
 }
 
-bool HalClock::localTime(struct tm& out) const {
+bool HalClock::utcTime(time_t& out) const {
   if (!_available) return false;
 
   const unsigned long now = millis();
@@ -48,8 +48,13 @@ bool HalClock::localTime(struct tm& out) const {
     }
     _lastPollMs = now != 0 ? now : 1;  // 0 doubles as the invalidation sentinel
   }
-  localtime_r(&_cachedUtc, &out);
+  out = _cachedUtc;
   return true;
+}
+
+bool HalClock::localTime(struct tm& out) const {
+  time_t utc;
+  return utcTime(utc) && localtime_r(&utc, &out) != nullptr;
 }
 
 bool HalClock::getTime(uint8_t& hour, uint8_t& minute) const {

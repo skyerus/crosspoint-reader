@@ -1,3 +1,4 @@
+#include <HalClock.h>
 #include <HalStorage.h>
 #include <gtest/gtest.h>
 
@@ -10,6 +11,7 @@ constexpr const char* INTENT = "/.crosspoint/highlight-outbox/transaction.intent
 class ArchiveDurability : public testing::Test {
  protected:
   void SetUp() override {
+    halClock.now = 0;
     Storage.files.clear();
     Storage.directories.clear();
     HalFile::failClose = false;
@@ -20,7 +22,7 @@ class ArchiveDurability : public testing::Test {
     Storage.files[path] = std::make_shared<std::string>(data);
   }
   HighlightMutation mutation(bool deleted = false) {
-    return {"stable-id", "Book", "Author", "complete excerpt", deleted};
+    return {"stable-id", "Book", "Author", "complete excerpt", deleted, 1790841600};
   }
   void prepare(bool deleted = false) {
     put("/store", "old");
@@ -268,4 +270,79 @@ TEST_F(ArchiveDurability, UnreadableOutboxDirectoryMustNotReportQueueEmpty) {
   HighlightMutation event;
   EXPECT_FALSE(HighlightOutbox::next(path, event));
   EXPECT_TRUE(HighlightOutbox::pending());
+}
+
+TEST_F(ArchiveDurability, CreationDateSurvivesCrashRecoveryAndRetry) {
+  prepare();
+  commitSource();
+  std::string path;
+  HighlightMutation event;
+  ASSERT_TRUE(HighlightOutbox::next(path, event));
+  EXPECT_EQ(event.createdAt, 1790841600u);
+  ASSERT_TRUE(HighlightOutbox::next(path, event));
+  EXPECT_EQ(event.createdAt, 1790841600u);
+}
+TEST_F(ArchiveDurability, LegacyIntentAndReadyRecordsRemainUndated) {
+  prepare();
+  auto& bytes = *Storage.files[INTENT];
+  bytes[0] = 1;
+  bytes.resize(bytes.size() - sizeof(uint32_t));
+  commitSource();
+  std::string path;
+  HighlightMutation event;
+  event.createdAt = 1790841600;
+  ASSERT_TRUE(HighlightOutbox::next(path, event));
+  EXPECT_EQ(event.createdAt, 0u);
+  ASSERT_TRUE(HighlightOutbox::next(path, event));
+  EXPECT_EQ(event.createdAt, 0u);
+  EXPECT_TRUE(HighlightOutbox::acknowledge(path));
+}
+TEST_F(ArchiveDurability, SavedDateSurvivesRebootMigrationAndArchiveSeeding) {
+  halClock.now = 1790841600;
+  ClippingStore store;
+  ASSERT_TRUE(store.loadForBook("/book.epub", "Book", "Author", "epub"));
+  ASSERT_EQ(add(store, "dated excerpt"), ClippingStore::AddResult::Added);
+  drain();
+  halClock.now = 1791000000;
+  ASSERT_TRUE(ClippingStore::migrateForFilePath("/book.epub", "/moved.epub", "Book", "Author", "epub"));
+  ASSERT_TRUE(store.loadForBook("/moved.epub", "Book", "Author", "epub"));
+  EXPECT_EQ(store.clippingAt(0)->timestamp, 1790841600u);
+  ASSERT_EQ(ClippingStore::seedOneArchiveClipping(), 1);
+  std::string path;
+  HighlightMutation event;
+  ASSERT_TRUE(HighlightOutbox::next(path, event));
+  EXPECT_EQ(event.createdAt, 1790841600u);
+}
+TEST_F(ArchiveDurability, MissingOrInvalidClockDoesNotInventDate) {
+  for (time_t value : {time_t(0), time_t(1234), time_t(4102444800LL)}) {
+    halClock.now = value;
+    ClippingStore store;
+    ASSERT_TRUE(store.loadForBook("/book.epub", "Book", "Author", "epub"));
+    ASSERT_EQ(add(store, "undated excerpt"), ClippingStore::AddResult::Added);
+    std::string path;
+    HighlightMutation event;
+    ASSERT_TRUE(HighlightOutbox::next(path, event));
+    EXPECT_EQ(event.createdAt, 0u);
+    drain();
+  }
+}
+TEST_F(ArchiveDurability, VersionThreeUptimeIsDiscardedWithoutLosingTextOrLayout) {
+  halClock.now = 1790841600;
+  ClippingStore store;
+  ASSERT_TRUE(store.loadForBook("/book.epub", "Book", "Author", "epub"));
+  ASSERT_EQ(add(store, "legacy excerpt"), ClippingStore::AddResult::Added);
+  drain();
+  for (auto& [path, data] : Storage.files) {
+    if (path.ends_with(".bin")) (*data)[0] = 3;
+  }
+  ASSERT_TRUE(store.loadForBook("/book.epub", "Book", "Author", "epub"));
+  EXPECT_EQ(store.clippingAt(0)->timestamp, 0u);
+  EXPECT_EQ(store.clippingAt(0)->layoutSignature, 123u);
+  std::string text;
+  ASSERT_TRUE(store.readClippingText(0, text));
+  EXPECT_EQ(text, "legacy excerpt");
+  ASSERT_EQ(add(store, "new excerpt"), ClippingStore::AddResult::Added);
+  ASSERT_TRUE(store.loadForBook("/book.epub", "Book", "Author", "epub"));
+  EXPECT_EQ(store.clippingAt(0)->timestamp, 0u);
+  EXPECT_EQ(store.clippingAt(1)->timestamp, 1790841600u);
 }

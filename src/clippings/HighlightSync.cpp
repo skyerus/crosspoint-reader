@@ -4,6 +4,7 @@
 #include <HTTPClient.h>
 #include <HalStorage.h>
 #include <WiFi.h>
+#include <time.h>
 
 namespace {
 // Plain HTTP is explicitly limited to the trusted home LAN. No redirects are
@@ -51,6 +52,14 @@ bool uploadHighlightMutation(const HighlightSyncConfig& config, const HighlightM
   highlight["author"] = mutation.author;
   highlight["text"] = mutation.text;
   if (mutation.deleted) highlight["deleted"] = true;
+  if (!mutation.deleted && mutation.createdAt >= 946684800U && mutation.createdAt <= 4102444799U) {
+    const time_t epoch = mutation.createdAt;
+    struct tm utc;
+    char createdAt[21];
+    if (gmtime_r(&epoch, &utc) && strftime(createdAt, sizeof(createdAt), "%Y-%m-%dT%H:%M:%SZ", &utc)) {
+      highlight["created_at"] = createdAt;
+    }
+  }
   if (doc.overflowed()) return false;
   std::string body;
   serializeJson(doc, body);

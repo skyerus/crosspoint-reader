@@ -1,6 +1,7 @@
 #include "ClippingStore.h"
 
 #include <Arduino.h>
+#include <HalClock.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -16,8 +17,8 @@
 
 namespace {
 constexpr uint8_t LEGACY_VERSION = 1;
-constexpr uint8_t TEXT_OFFSET_VERSION = 2;
-constexpr uint8_t VERSION = 3;
+constexpr uint8_t LAYOUT_VERSION = 3;
+constexpr uint8_t VERSION = 4;
 constexpr size_t INITIAL_CLIPPING_RESERVE = 4;
 constexpr char CLIPPINGS_DIR[] = "/.crosspoint/clippings";
 constexpr size_t TEXT_COPY_BUFFER_SIZE = 128;
@@ -50,8 +51,7 @@ bool readClippingFileHeader(const std::string& fullPath, const char* name, Clipp
 
   uint8_t version = 0;
   uint16_t count = 0;
-  if (!serialization::tryReadPod(f, version) ||
-      (version != LEGACY_VERSION && version != TEXT_OFFSET_VERSION && version != VERSION) ||
+  if (!serialization::tryReadPod(f, version) || (version < LEGACY_VERSION || version > VERSION) ||
       !serialization::tryReadPod(f, count) || !serialization::tryReadString(f, header.title, HEADER_STRING_MAX) ||
       !serialization::tryReadString(f, header.author, HEADER_STRING_MAX) ||
       !serialization::tryReadString(f, header.path, HEADER_STRING_MAX)) {
@@ -159,7 +159,10 @@ ClippingStore::AddResult ClippingStore::addClipping(const uint16_t spineIndex, c
   clipping.endWordIndex = endWordIndex;
   clipping.wordCount = wordCount;
   clipping.paragraphIndex = paragraphIndex;
-  clipping.timestamp = static_cast<uint32_t>(millis() / 1000UL);
+  time_t createdAt;
+  if (halClock.utcTime(createdAt) && createdAt >= 946684800LL && createdAt <= 4102444799LL) {
+    clipping.timestamp = static_cast<uint32_t>(createdAt);
+  }
   clipping.layoutSignature = layoutSignature;
   copyBounded(clipping.chapterTitle, sizeof(clipping.chapterTitle), chapterTitle);
   clipping.textLength = static_cast<uint16_t>(std::min(text.size(), CLIPPING_TEXT_MAX));
@@ -171,6 +174,7 @@ ClippingStore::AddResult ClippingStore::addClipping(const uint16_t spineIndex, c
   mutation.author = bookAuthor;
   mutation.text = text.substr(0, CLIPPING_TEXT_MAX);
   mutation.id = highlightId(bookTitle, bookAuthor, mutation.text);
+  mutation.createdAt = clippings.back().timestamp;
   if (!writeToFile(&text, clippings.size() - 1, nullptr, &mutation)) {
     clippings.pop_back();
     dirty = true;
@@ -327,8 +331,7 @@ bool ClippingStore::readFromFile(const std::string& path, std::vector<Clipping>&
   std::string title;
   std::string author;
   std::string storedPath;
-  if (!serialization::tryReadPod(f, version) ||
-      (version != LEGACY_VERSION && version != TEXT_OFFSET_VERSION && version != VERSION) ||
+  if (!serialization::tryReadPod(f, version) || (version < LEGACY_VERSION || version > VERSION) ||
       !serialization::tryReadPod(f, count) || !serialization::tryReadString(f, title, HEADER_STRING_MAX) ||
       !serialization::tryReadString(f, author, HEADER_STRING_MAX) ||
       !serialization::tryReadString(f, storedPath, HEADER_STRING_MAX)) {
@@ -358,7 +361,9 @@ bool ClippingStore::readFromFile(const std::string& path, std::vector<Clipping>&
       out.clear();
       return false;
     }
-    if (version >= VERSION && !serialization::tryReadPod(f, clipping.layoutSignature)) {
+    // Versions 1-3 stored boot uptime, not a creation date.
+    if (version < VERSION) clipping.timestamp = 0;
+    if (version >= LAYOUT_VERSION && !serialization::tryReadPod(f, clipping.layoutSignature)) {
       f.close();
       LOG_ERR("CLIP", "Clipping file truncated at layout signature, record %u: %s", i, path.c_str());
       out.clear();
@@ -595,6 +600,7 @@ int ClippingStore::seedOneArchiveClipping() {
     mutation.author = header->author;
     if (!book->readClippingText(cursor, mutation.text)) return -1;
     mutation.id = highlightId(mutation.title, mutation.author, mutation.text);
+    mutation.createdAt = book->clippingAt(cursor)->timestamp;
     if (!transaction.prepare(path, path, mutation) || !transaction.commit()) return -1;
     ++cursor;
     const std::string temporary = marker + ".tmp";

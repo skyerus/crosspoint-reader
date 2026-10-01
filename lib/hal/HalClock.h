@@ -30,6 +30,9 @@ class HalClock {
   // shows immediately.
   void setTimezone(const char* posixTz);
 
+  // Cached UTC from the existing RTC; never enables WiFi or requests NTP.
+  bool utcTime(time_t& out) const;
+
   // Current wall-clock time in the configured timezone.
   // Returns false if RTC is not available.
   bool localTime(struct tm& out) const;

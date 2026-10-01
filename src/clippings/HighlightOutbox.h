@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <mutex>
 #include <string>
 
@@ -8,6 +9,7 @@ struct HighlightMutation {
   std::string author;
   std::string text;
   bool deleted = false;
+  uint32_t createdAt = 0;
 };
 std::string highlightId(const std::string& title, const std::string& author, const std::string& text);
 
