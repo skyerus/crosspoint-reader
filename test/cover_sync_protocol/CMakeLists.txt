@@ -1,0 +1,3 @@
+add_executable(cover_sync_protocol_test CoverSyncProtocolTest.cpp)
+target_link_libraries(cover_sync_protocol_test PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(cover_sync_protocol_test)

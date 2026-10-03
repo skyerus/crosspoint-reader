@@ -860,6 +860,27 @@ bool Epub::generateThumbBmpFromSource(int height) {
   return generateThumbBmpForCover(height, metadata->coverItemHref);
 }
 
+bool Epub::extractOriginalCoverToFile(std::string& contentType, size_t& size, const std::string& destPath,
+                                      const size_t maxSize) const {
+  contentType.clear();
+  size = 0;
+  if (!bookMetadataCache) {
+    LOG_ERR("EBP", "Cannot extract cover before metadata is loaded");
+    return false;
+  }
+  const std::string& href = bookMetadataCache->coreMetadata.coverItemHref;
+  if (FsHelpers::hasJpgExtension(href)) {
+    contentType = "image/jpeg";
+  } else if (FsHelpers::hasPngExtension(href)) {
+    contentType = "image/png";
+  } else {
+    LOG_DBG("EBP", "No supported original cover image");
+    return false;
+  }
+  if (!getItemSize(href, &size) || size == 0 || size > maxSize) return false;
+  return extractItemToFile(href, destPath);
+}
+
 bool Epub::generateThumbBmpForCover(int height, const std::string& coverImageHref) const {
   if (coverImageHref.empty()) {
     LOG_DBG("EBP", "No known cover image for thumbnail");

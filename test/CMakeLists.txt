@@ -74,6 +74,9 @@ add_subdirectory(txt_to_html)
 add_subdirectory(absolute_grayscale)
 
 add_subdirectory(sd_card_font)
+add_subdirectory(clipping_preview)
+add_subdirectory(cover_sync_protocol)
+add_subdirectory(koreader_sync_memory)
 add_subdirectory(glyph_bitmap)
 
 add_subdirectory(reader_session)
@@ -82,3 +85,6 @@ add_subdirectory(protected_paths)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME TrustedTimeTimezone COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_trusted_time.py)
+add_subdirectory(clipping_store)
+
+add_subdirectory(clip_selection)

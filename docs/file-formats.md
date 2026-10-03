@@ -515,3 +515,17 @@ make a real book disappear.
 
 `selfSize` is the expected file size. Comparing it against the real one is a free
 truncation guard: a build cut short by a power failure cannot pass.
+
+## Shared highlight creation dates
+
+Clipping store version 4 retains the version 3 record layout, but the uint32
+`timestamp` now stores UTC Unix seconds (zero means unknown). Readers accept
+versions 1–3 and discard their boot-uptime timestamp when loading; those entries
+remain undated on rewrite. Layout signatures remain present from version 3.
+
+Highlight outbox version 2 appends a uint32 UTC `createdAt` after the deletion
+flag. Version 1 intents and ready records are still replayed with an unknown
+date. Creation dates are captured from the existing RTC when saving a highlight,
+never inferred from upload time. Replay, migration, and archive seeding retain
+the saved value. No extra networking, clock synchronization, or timer is added.
+The clipping index uses no additional RAM; each pending mutation adds four bytes.

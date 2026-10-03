@@ -1,0 +1,3 @@
+add_executable(koreader_sync_memory_test KOReaderSyncMemoryTest.cpp)
+target_link_libraries(koreader_sync_memory_test PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(koreader_sync_memory_test)

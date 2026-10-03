@@ -68,6 +68,10 @@ class Epub {
   bool generateThumbBmp(int height) const;
   // Locate the cover without building spine, TOC, or reading caches.
   bool generateThumbBmpFromSource(int height);
+  // Copies the declared JPEG/PNG cover from the EPUB to SD without decoding it.
+  // The caller owns removing destPath after the upload attempt.
+  bool extractOriginalCoverToFile(std::string& contentType, size_t& size, const std::string& destPath,
+                                  size_t maxSize) const;
   uint8_t* readItemContentsToBytes(const std::string& itemHref, size_t* size = nullptr,
                                    bool trailingNullByte = false) const;
   bool readItemContentsToStream(const std::string& itemHref, Print& out, size_t chunkSize,

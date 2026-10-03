@@ -9,6 +9,7 @@
 #include <string>
 
 #include "KOReaderCredentialStore.h"
+#include "KOReaderSyncMemory.h"
 
 int KOReaderSyncClient::lastHttpCode = 0;
 
@@ -16,13 +17,6 @@ namespace {
 // Device identifier for CrossPoint reader
 constexpr char DEVICE_NAME[] = "CrossPoint";
 constexpr char DEVICE_ID[] = "crosspoint-reader";
-
-// wolfSSL uses the default allocator, which can use PSRAM on supported builds.
-// Keep a free-space floor and room for a full TLS record when the server does
-// not negotiate our smaller record limit. These are preflight margins, not a
-// guarantee that a handshake will fit.
-constexpr uint32_t MIN_FREE_FOR_TLS = 35000;
-constexpr uint32_t MIN_BLOCK_FOR_TLS = 20000;
 
 // Apply the shared KOSync auth headers after begin(). x-auth-* is the native
 // KOSync scheme; Basic auth is added for Calibre-Web-Automated compatibility.
@@ -36,12 +30,15 @@ void applyAuthHeaders(freeink::SecureHttpClient& http) {
 }
 
 // True when free heap is too low to risk a TLS handshake.
-bool insufficientHeap() {
+bool insufficientHeap(const std::string& url) {
+  // Plain HTTP uses the SDK's TCP client and allocates no TLS handshake state.
+  if (!koReaderSyncMemory::needsTls(url)) return false;
   const auto heap = HalMemory::getDefaultHeap();
-  if (heap.freeBytes < MIN_FREE_FOR_TLS || heap.largestBlockBytes < MIN_BLOCK_FOR_TLS) {
+  if (koReaderSyncMemory::insufficientHeap(url, heap.freeBytes, heap.largestBlockBytes)) {
     LOG_ERR("KOSync",
             "Insufficient allocatable heap for TLS handshake: %zu bytes free (need %u), %zu max alloc (need %u)",
-            heap.freeBytes, MIN_FREE_FOR_TLS, heap.largestBlockBytes, MIN_BLOCK_FOR_TLS);
+            heap.freeBytes, static_cast<unsigned>(koReaderSyncMemory::MIN_FREE_FOR_TLS), heap.largestBlockBytes,
+            static_cast<unsigned>(koReaderSyncMemory::MIN_BLOCK_FOR_TLS));
     return true;
   }
   return false;
@@ -57,7 +54,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::authenticate() {
 
   const std::string url = KOREADER_STORE.getBaseUrl() + "/users/auth";
   LOG_DBG("KOSync", "Authenticating: %s (heap: %u)", url.c_str(), (unsigned)ESP.getFreeHeap());
-  if (insufficientHeap()) return LOW_MEMORY;
+  if (insufficientHeap(url)) return LOW_MEMORY;
 
   freeink::SecureHttpClient http;
   http.setInsecure();
@@ -90,7 +87,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::createUser() {
 
   const std::string url = KOREADER_STORE.getBaseUrl() + "/users/create";
   LOG_DBG("KOSync", "Creating account: %s (heap: %u)", url.c_str(), (unsigned)ESP.getFreeHeap());
-  if (insufficientHeap()) return LOW_MEMORY;
+  if (insufficientHeap(url)) return LOW_MEMORY;
 
   JsonDocument doc;
   doc["username"] = KOREADER_STORE.getUsername();
@@ -128,7 +125,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
 
   const std::string url = KOREADER_STORE.getBaseUrl() + "/syncs/progress/" + documentHash;
   LOG_DBG("KOSync", "Getting progress: %s (heap: %u)", url.c_str(), (unsigned)ESP.getFreeHeap());
-  if (insufficientHeap()) return LOW_MEMORY;
+  if (insufficientHeap(url)) return LOW_MEMORY;
 
   freeink::SecureHttpClient http;
   http.setInsecure();
@@ -211,7 +208,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
 
   const std::string url = KOREADER_STORE.getBaseUrl() + "/syncs/progress";
   LOG_DBG("KOSync", "Updating progress: %s (heap: %u)", url.c_str(), (unsigned)ESP.getFreeHeap());
-  if (insufficientHeap()) return LOW_MEMORY;
+  if (insufficientHeap(url)) return LOW_MEMORY;
 
   // Build JSON body
   JsonDocument doc;
