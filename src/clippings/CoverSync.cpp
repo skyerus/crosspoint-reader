@@ -12,6 +12,7 @@
 #include <ctime>
 #include <mutex>
 
+#include "CoverFileStream.h"
 #include "CoverSyncProtocol.h"
 #include "HighlightSync.h"
 
@@ -22,28 +23,6 @@ constexpr size_t MAX_COVER_BYTES = 5U * 1024U * 1024U;
 constexpr size_t MAX_RECORD_BYTES = 8192;
 constexpr size_t MAX_METADATA_BYTES = 1024;
 std::mutex queueMutex;
-
-// HTTPClient's streaming request overload takes Stream, while HalFile is a
-// Print to keep its writable use narrow. This adapter reads directly through
-// HalStorage's mutex without buffering cover bytes in heap.
-class CoverFileStream final : public Stream {
- public:
-  CoverFileStream(HalFile& file, const std::atomic<bool>& cancelled) : file(file), cancelled(cancelled) {}
-  int available() override { return cancelled.load() ? 0 : file.available(); }
-  int read() override { return cancelled.load() ? -1 : file.read(); }
-  int peek() override { return -1; }
-  size_t readBytes(char* buffer, size_t length) override {
-    if (cancelled.load()) return 0;
-    const int read = file.read(buffer, length);
-    return read > 0 ? static_cast<size_t>(read) : 0;
-  }
-  void flush() override {}
-  size_t write(uint8_t) override { return 0; }
-
- private:
-  HalFile& file;
-  const std::atomic<bool>& cancelled;
-};
 
 std::string digest(const std::string& value) {
   MD5Builder hash;

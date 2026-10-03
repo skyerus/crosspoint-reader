@@ -1,0 +1,4 @@
+add_executable(cover_file_stream_test CoverFileStreamTest.cpp)
+target_link_libraries(cover_file_stream_test PRIVATE crosspoint_test_common GTest::gtest_main)
+target_include_directories(cover_file_stream_test BEFORE PRIVATE stubs)
+gtest_discover_tests(cover_file_stream_test)

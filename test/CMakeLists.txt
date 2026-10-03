@@ -76,6 +76,7 @@ add_subdirectory(absolute_grayscale)
 add_subdirectory(sd_card_font)
 add_subdirectory(clipping_preview)
 add_subdirectory(cover_sync_protocol)
+add_subdirectory(cover_file_stream)
 add_subdirectory(koreader_sync_memory)
 add_subdirectory(glyph_bitmap)
 
