@@ -301,7 +301,8 @@ bool EpubReaderActivity::loadBook() {
   if (!CLIPPINGS.loadForBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), "epub")) {
     LOG_ERR("CLIP", "Failed to load clippings for %s", epub->getPath().c_str());
   } else if (CLIPPINGS.hasClippings()) {
-    CoverSync::queue(*epub);
+    RenderLock lock;
+    if (CoverSync::queue(*epub, renderer)) disableFastInitialRefresh();
   }
   return true;
 }
@@ -479,7 +480,13 @@ void EpubReaderActivity::startClipSelection() {
       }
       // The clipping transaction has committed before AddResult::Added. This
       // starts cover transfer only for books the user actually highlights.
-      if (epub) CoverSync::queue(*epub);
+      if (epub) {
+        RenderLock lock;
+        if (CoverSync::queue(*epub, renderer)) {
+          discardOverlayPage();
+          disableFastInitialRefresh();
+        }
+      }
     }
     clippingSaved = addResult == ClippingStore::AddResult::Added;
     clippingTruncated = clippingSaved && clipping.truncated;

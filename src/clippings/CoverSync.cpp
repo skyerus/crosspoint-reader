@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <Epub.h>
+#include <GfxRenderer.h>
 #include <HTTPClient.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -86,12 +87,12 @@ bool nextRecord(const HighlightSyncConfig& config, std::string& recordPath, Json
 }  // namespace
 
 namespace CoverSync {
-void queue(const Epub& epub) {
+bool queue(const Epub& epub, GfxRenderer& renderer) {
   const std::lock_guard<std::mutex> lock(queueMutex);
   HighlightSyncConfig config;
-  if (!config.load()) return;
+  if (!config.load()) return false;
   HalFile source;
-  if (!Storage.openFileForRead("Cover", epub.getPath(), source)) return;
+  if (!Storage.openFileForRead("Cover", epub.getPath(), source)) return false;
   const std::string target = digest(config.targetEndpoint + "\n" + config.token);
   const std::string key = digest(epub.getPath() + "\n" + std::to_string(source.fileSize64()) + "\n" +
                                  std::to_string(source.modificationTime()) + "\n" + epub.getTitle() + "\n" +
@@ -103,26 +104,33 @@ void queue(const Epub& epub) {
     const char* staged = existing["file"] | "";
     if (strcmp(state, "stored") == 0 || strcmp(state, "unavailable") == 0 ||
         (strcmp(state, "pending") == 0 && Storage.exists(staged)))
-      return;
+      return false;
     Storage.remove(recordPath.c_str());
   }
-  if (!Storage.exists(DIRECTORY) && !Storage.mkdir(DIRECTORY)) return;
+  if (!Storage.exists(DIRECTORY) && !Storage.mkdir(DIRECTORY)) return false;
 
   // Staged artwork must survive book moves and reader-cache eviction.
   const std::string stageBase = std::string(DIRECTORY) + "/artwork-" + key;
   std::string contentType;
   size_t size = 0;
   std::string stagePath = stageBase;
-  if (!epub.extractOriginalCoverToFile(contentType, size, stageBase + ".part", MAX_COVER_BYTES)) {
+  bool extracted;
+  {
+    // InflateStream claims the existing framebuffer for its state and 32 KB
+    // window, avoiding another ~43 KB of temporary heap allocations.
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    extracted = epub.extractOriginalCoverToFile(contentType, size, stageBase + ".part", MAX_COVER_BYTES);
+  }
+  if (!extracted) {
     // An empty type means metadata named no usable cover. I/O failures retain
     // the opportunity to stage the same source on a later reader open.
-    if (!contentType.empty() && size <= MAX_COVER_BYTES) return;
+    if (!contentType.empty() && size <= MAX_COVER_BYTES) return true;
     JsonDocument record;
     record["state"] = "unavailable";
     record["target"] = target;
     record["book"] = key;
     writeRecord(recordPath.c_str(), record);
-    return;
+    return true;
   }
   if (size == 0 || size > MAX_COVER_BYTES || epub.getTitle().size() > MAX_METADATA_BYTES ||
       epub.getAuthor().size() > MAX_METADATA_BYTES) {
@@ -132,11 +140,11 @@ void queue(const Epub& epub) {
     record["target"] = target;
     record["book"] = key;
     writeRecord(recordPath.c_str(), record);
-    return;
+    return true;
   }
   const char* extension = contentType == "image/png" ? ".png" : ".jpg";
   stagePath += extension;
-  if (!Storage.replaceFile((stageBase + ".part").c_str(), stagePath.c_str())) return;
+  if (!Storage.replaceFile((stageBase + ".part").c_str(), stagePath.c_str())) return true;
 
   JsonDocument record;
   record["state"] = "pending";
@@ -146,7 +154,12 @@ void queue(const Epub& epub) {
   record["type"] = contentType;
   record["title"] = epub.getTitle();
   record["author"] = epub.getAuthor();
-  if (!writeRecord(recordPath.c_str(), record)) Storage.remove(stagePath.c_str());
+  if (!writeRecord(recordPath.c_str(), record)) {
+    Storage.remove(stagePath.c_str());
+  } else {
+    LOG_INF("Cover", "Staged %zu-byte original cover", size);
+  }
+  return true;
 }
 
 bool pending(const HighlightSyncConfig& config) {
