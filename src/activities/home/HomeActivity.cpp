@@ -298,6 +298,12 @@ void HomeActivity::freeCoverBuffer() {
   coverBufferStored = false;
 }
 
+void HomeActivity::releaseBackgroundSyncMemory() {
+  freeCoverBuffer();
+  // The panel retains its image; the next render reloads the cover from SD.
+  coverRendered = false;
+}
+
 void HomeActivity::loop() {
   const int menuCount = getMenuItemCount();
   const auto& metrics = UITheme::getInstance().getMetrics();

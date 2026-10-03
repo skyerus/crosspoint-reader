@@ -380,6 +380,11 @@ bool ActivityManager::allowsHighlightAutoSync() const {
          (currentActivity->isHomeActivity() || currentActivity->name == "EpubReader");
 }
 
+void ActivityManager::releaseBackgroundSyncMemory() {
+  RenderLock lock(RenderLock::Mode::Try);
+  if (lock.ownsLock() && allowsHighlightAutoSync()) currentActivity->releaseBackgroundSyncMemory();
+}
+
 bool ActivityManager::preventAutoSleep() const { return currentActivity && currentActivity->preventAutoSleep(); }
 
 bool ActivityManager::requiresExclusiveStorageLoop() const {

@@ -229,6 +229,13 @@ EpubReaderActivity::~EpubReaderActivity() {
   }
 }
 
+void EpubReaderActivity::releaseBackgroundSyncMemory() {
+  settleOverlayRefresh();
+  discardOverlayPage();
+  ImageBlock::releaseRenderCache();
+  if (auto* cache = renderer.getFontCacheManager()) cache->releaseSdFontCaches();
+}
+
 bool EpubReaderActivity::loadBook() {
   auto loadedEpub = makeUniqueNoThrow<Epub>(bookPath, "/.crosspoint");
   if (!loadedEpub) {

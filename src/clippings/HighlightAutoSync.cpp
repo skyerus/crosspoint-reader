@@ -31,6 +31,10 @@ RTC_DATA_ATTR time_t retryAfter = 0;
 RTC_DATA_ATTR unsigned failures = 0;
 unsigned long checkAfter = 0;
 
+bool hasUploadMemory(const HalMemory::HeapStats& heap) {
+  return heap.freeBytes >= 80000 && heap.largestBlockBytes >= 24000;
+}
+
 bool resolveLocalHost(HighlightSyncConfig& config) {
   const size_t slash = config.endpoint.find('/', 7);
   const std::string authority = config.endpoint.substr(7, slash - 7);
@@ -54,6 +58,7 @@ void worker(void*) {
   // time. A task prevents TCP deadlines from blocking touch/page navigation.
   bool success = false;
   bool ownedRadio = false;
+  bool hadWork = false;
   {
     HalPowerManager::Lock powerLock;
     HighlightSyncConfig config;
@@ -67,6 +72,7 @@ void worker(void*) {
       }
       const bool hasHighlights = HighlightOutbox::pending();
       const bool hasCovers = CoverSync::pending(config);
+      hadWork = hasHighlights || hasCovers;
       if (!hasHighlights && !hasCovers)
         success = seeded.load();
       else {
@@ -124,6 +130,14 @@ void worker(void*) {
     retryAfter = now + (result == 3 ? 15 : result == 4 ? 30 : 5);
   }
   outcome.store(result);
+  if (hadWork) {
+    const auto heap = HalMemory::getInternalHeap();
+    LOG_INF("HSync", "Upload %s; heap %zu free/%zu max",
+            cancelled.load() ? "cancelled"
+            : success        ? "complete"
+                             : "retry",
+            heap.freeBytes, heap.largestBlockBytes);
+  }
   // All filesystem/radio work is finished before transitions may resume.
   running.store(false);
   vTaskDelete(nullptr);
@@ -142,7 +156,7 @@ void stopAndWait() {
   // cancellation checks bound this cooperative drain before raw SD/sleep.
   while (running.load()) delay(10);
 }
-void tick(bool eligible) {
+void tick(bool eligible, void (*reclaimMemory)()) {
   if (running.load()) {
     if (!eligible) cancelled.store(true);
     return;
@@ -156,8 +170,27 @@ void tick(bool eligible) {
   }
   if (running.load() || now < retryAfter || static_cast<int32_t>(millis() - checkAfter) < 0) return;
   checkAfter = millis() + 5000;
-  const auto heap = HalMemory::getInternalHeap();
-  if (heap.freeBytes < 80000 || heap.largestBlockBytes < 24000) return;
+  auto heap = HalMemory::getInternalHeap();
+  if (!hasUploadMemory(heap)) {
+    if (!reclaimMemory) return;
+    // Do not evict reading caches for an unpaired reader or an empty queue.
+    // Drop the temporary config strings before measuring reclaimed memory.
+    {
+      HighlightSyncConfig config;
+      if (!config.load()) return;
+      if (!HighlightOutbox::pending() && !CoverSync::pending(config) &&
+          (seeded.load() || !ClippingStore::hasAnyClippings()))
+        return;
+    }
+    const size_t before = heap.freeBytes;
+    reclaimMemory();
+    heap = HalMemory::getInternalHeap();
+    if (heap.freeBytes > before) {
+      LOG_INF("HSync", "Released display caches: heap %zu -> %zu free/%zu max", before, heap.freeBytes,
+              heap.largestBlockBytes);
+    }
+    if (!hasUploadMemory(heap)) return;
+  }
   cancelled.store(false);
   running.store(true);
   TaskHandle_t handle = nullptr;

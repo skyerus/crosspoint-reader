@@ -105,6 +105,7 @@ class ActivityManager {
 
   bool preventAutoSleep() const;
   bool allowsHighlightAutoSync() const;
+  void releaseBackgroundSyncMemory();
   bool requiresExclusiveStorageLoop() const;
   bool isReaderActivity() const;
   bool handleForcedRefresh();

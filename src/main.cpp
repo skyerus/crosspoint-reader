@@ -696,7 +696,8 @@ void loop() {
     return;
   }
 
-  HighlightAutoSync::tick(activityManager.allowsHighlightAutoSync());
+  HighlightAutoSync::tick(activityManager.allowsHighlightAutoSync(),
+                          [] { activityManager.releaseBackgroundSyncMemory(); });
 
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
 
