@@ -129,7 +129,8 @@ void queue(const Epub& epub) {
   }
   if (!Storage.exists(DIRECTORY) && !Storage.mkdir(DIRECTORY)) return;
 
-  const std::string stageBase = epub.getCachePath() + "/.reader-bridge-cover-" + key;
+  // Staged artwork must survive book moves and reader-cache eviction.
+  const std::string stageBase = std::string(DIRECTORY) + "/artwork-" + key;
   std::string contentType;
   size_t size = 0;
   std::string stagePath = stageBase;
